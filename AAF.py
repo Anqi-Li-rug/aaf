@@ -8,6 +8,7 @@ import math
 import multiprocessing
 import itertools
 import datetime
+import argparse
 
 
 def corr(ini_ob_spec, Re_sb, nconv):
@@ -200,4 +201,10 @@ def MS_corr(msname, tol):
 
 
 if __name__ == '__main__':
-    print("")
+    parser = argparse.ArgumentParser(description="Apertif Anti-aliasing filter")
+    parser.add_argument("msname", help="Name of Measurement Set")
+    parser.add_argument("-t", "--tolerance", help="Filter response below this limit will be ignored", type=float,
+                        default=0.00001)
+    args = parser.parse_args()
+
+    MS_corr(args.msname, args.tolerance)
