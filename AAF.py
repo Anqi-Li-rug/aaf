@@ -13,7 +13,7 @@ import argparse
 
 def corr(ini_ob_spec, Re_sb, nconv):
     """
-    Perform AAF calibration
+    Perform AAF correction
     
     Args:
         ini_ob_spec (np.array): input spectrum, which is supposed from raw MS(visibility),
@@ -144,22 +144,34 @@ def conver(a_b):
     return corr(*a_b)
 
 
-def MS_corr(msname, tol):
-    # this function is to implement function corr parallel on the whole MeasurementSET
-    # 1.open MS and read subtable 'DATA', create a new subtable "DATA_AAF" to store AAF corrected data.
+def MS_corr(msname, tol, outputcolname="DATA_AAF"):
+    """
+    Apply an anti aliasing filter in a parallel way to a measurement set
+
+    Params:
+        msname (str): Name of measurement set
+        tol (float): Filter response below this limit will be ignored
+        outputcolname (str): Name of column to write corrected visibilities to (will be added to MS if necessary)
+
+    Returns:
+        None
+    """
+    # this function is to implement function corr parallel on the whole MeasurementSet
+    # 1. Open MS and read subtable 'DATA',
+    #    if necessary create a new column (default "DATA_AAF") to store AAF corrected data.
     t1 = datetime.datetime.now()
-    ms = tables.table(msname, readonly=False)
+    ms = tables.table(msname, readonly=False, ack=False)
     nrows = ms.nrows()
     ini_data = tables.tablecolumn(ms, 'DATA')
 
-    # if there is no subtable "DATA_AAF", then create one.
-    if "DATA_AAF" not in ms.colnames():
-        coldes = tables.makecoldesc('DATA_AAF', ms.getcoldesc('DATA'))
+    # If there is no column "DATA_AAF", then create one.
+    if outputcolname not in ms.colnames():
+        coldes = tables.makecoldesc(outputcolname, ms.getcoldesc('DATA'))
         dmname = ms.getdminfo('DATA')
         dmname["NAME"] = 'TiledAAFData'
         ms.addcols(coldes, dminfo=dmname)
 
-    # 2.calculate function corr()'s two arguments:Re_sb and nconv
+    # 2. Calculate function corr()'s two arguments: Re_sb and nconv
 
     # Fixed parameters: Number of channels per subband;  Total number of subbands
     num_channels = 64
@@ -197,17 +209,19 @@ def MS_corr(msname, tol):
     start_row = np.array([0, chunksize, chunksize * 2, chunksize * 3])
     end_row = np.array([chunksize, chunksize * 2, chunksize * 3, nrows])
     for parti in range(0, 4):
-        ms.putcol('DATA_AAF', np.array(aafdata[start_row[parti]:end_row[parti]]), startrow=start_row[parti],
+        ms.putcol(outputcolname, np.array(aafdata[start_row[parti]:end_row[parti]]), startrow=start_row[parti],
                   nrow=end_row[parti] - start_row[parti])
     t2 = datetime.datetime.now()
     print("Total execution time:", (t2 - t1).total_seconds(), "seconds")
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Apertif Anti-aliasing filter")
+    parser = argparse.ArgumentParser(description="Apertif Anti-aliasing filter.")
     parser.add_argument("msname", help="Name of Measurement Set")
     parser.add_argument("-t", "--tolerance", help="Filter response below this limit will be ignored", type=float,
                         default=0.00001)
+    parser.add_argument("-o", "--output-column", help="Column to output the corrected visibilities to (default DATA_AAF)",
+                        default="DATA_AAF")
     args = parser.parse_args()
 
-    MS_corr(args.msname, args.tolerance)
+    MS_corr(args.msname, args.tolerance, outputcolname=args.output_column)
