@@ -81,7 +81,8 @@ def corr(ini_ob_spec, Re_sb, nconv):
                 dmissing[corri] = np.linalg.lstsq(
                         np.transpose(np.mat(f_corr)),
                         np.transpose(np.mat(ini_spec[num_subbands - nconv:, corri] -
-                                            corr_spec[num_subbands - nconv:, chidx, corri])))[0][0, 0]
+                                            corr_spec[num_subbands - nconv:, chidx, corri])),
+                        rcond=None)[0][0, 0]
                 corr_spec[num_subbands - nconv:, chidx, corri] = corr_spec[num_subbands - nconv:, chidx, corri] + \
                                                                  np.dot(f_corr, dmissing[corri])
 
@@ -97,8 +98,10 @@ def corr(ini_ob_spec, Re_sb, nconv):
             # Estimate of missing data,use neighbouring channel as initial estimate
             ini_spec = corr_spec[:, chidx - 1, :]
             for corri in np.arange(0, ncorr, 1):
-                dmissing[corri] = (np.linalg.lstsq(np.transpose(np.mat(f_corr)), np.transpose(
-                        np.mat(ini_spec[0:nconv, corri] - corr_spec[0:nconv, chidx, corri]))))[0][0, 0]
+                dmissing[corri] = np.linalg.lstsq(
+                        np.transpose(np.mat(f_corr)),
+                        np.transpose(np.mat(ini_spec[0:nconv, corri] - corr_spec[0:nconv, chidx, corri])),
+                        rcond=None)[0][0, 0]
                 corr_spec[0:nconv, chidx, corri] = corr_spec[0:nconv, chidx, corri] + np.dot(
                         np.reshape(f_corr, (1, f_corr.size)), dmissing[corri])
 
@@ -118,8 +121,8 @@ def corr(ini_ob_spec, Re_sb, nconv):
     for corri in np.arange(0, ncorr, 1):
         dmissing[corri] = np.linalg.lstsq(np.transpose(np.mat(f_corr[nedge:num_subbands - nedge])),
                                           np.transpose(np.mat(ini_spec[nedge:num_subbands - nedge, corri] -
-                                                              corr_spec[nedge:num_subbands - nedge, chidx, corri]))
-                                          )[0][0, 0]
+                                                              corr_spec[nedge:num_subbands - nedge, chidx, corri])),
+                                          rcond=None)[0][0, 0]
         corr_spec[:, chidx, corri] = corr_spec[:, chidx, corri] + np.dot(f_corr, dmissing[corri])
 
     # 3. Flag and reshape AAF corrected spectrum, transform power spectrum back to visibility complex numbers
