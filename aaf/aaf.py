@@ -9,30 +9,31 @@ import multiprocessing
 import itertools
 import datetime
 import argparse
+import os.path
 
 
-def corr(ini_ob_spec, Re_sb, nconv):
+def antialias_visibilities(vis, subband_response, nconv):
     """
     Perform AAF correction
-    
+
     Args:
-        ini_ob_spec (np.array): input spectrum, which is supposed from raw MS(visibility),
-                                datatype complex numbers, shape(num_subbands*64,correlator numbers)
-        Re_sb:                  filter frequency response, see annotation in the main function
-        nconv:                  deconvolution length
+        vis (np.array):   input spectrum, which is supposed from raw MS (visibility),
+                          datatype complex numbers, shape(num_subbands*64, number of correlations (4: xx, xy, yx, yy)0
+        subband_response: filter frequency response, see annotation in the main function
+        nconv:            deconvolution length
 
     Returns:
-        np.array: AAF corrected spectrum, same shape and datatype as ini_ob_spec
+        np.array: AAF corrected spectrum, same shape and datatype as vis
     """
     # 1. Preparation before implementation AAF
 
     # Calculate spectrum's subbands numbers, correlator numbers
-    ncorr = ini_ob_spec.shape[1]
+    ncorr = vis.shape[1]
     num_channels = 64
-    num_subbands = ini_ob_spec.shape[0] / 64
+    num_subbands = vis.shape[0] / 64
 
     # Calculate the power spectrum, reshape spectrum
-    ob_spec = abs(ini_ob_spec)
+    ob_spec = abs(vis)
     ob_spec = np.reshape(ob_spec, (num_subbands, num_channels, ncorr))
 
     # Estimate missing subbands
@@ -53,20 +54,20 @@ def corr(ini_ob_spec, Re_sb, nconv):
 
     # This algorithm also does bandpass correction!!!!!!
     # In case the input spectrum has already been bandpass corrected,  uncomment the next row to undoes this effect.
-    # ob_spec = np.swapaxes((np.swapaxes(ob_spec,1,2)/Re_sb[1,:]),1,2)
+    # ob_spec = np.swapaxes((np.swapaxes(ob_spec,1,2)/subband_response[1,:]),1,2)
 
     # Create and initialize a new array to store AAF corrected spectrum
     corr_spec = np.empty_like(ob_spec)
     corr_spec[:] = np.nan
 
     # Begin with central channel, suppose the central channel of each subband is not influenced by aliasing effect
-    corr_spec[:, num_channels / 2, :] = ob_spec[:, num_channels / 2, :] / Re_sb[1, num_channels / 2]
+    corr_spec[:, num_channels / 2, :] = ob_spec[:, num_channels / 2, :] / subband_response[1, num_channels / 2]
 
     # From central channel downwards,ignore response of previous subband (for a certain subband, channel1 to channel 31
     # was mostly influenced by next subband's channel1 to channel31)
     for chidx in np.arange(num_channels / 2 - 1, 0, -1):
-        ratio = -1. * Re_sb[2, chidx] / Re_sb[1, chidx]
-        f_corr = ratio ** (np.arange(nconv - 1, -1, -1)) / Re_sb[1, chidx]
+        ratio = -1. * subband_response[2, chidx] / subband_response[1, chidx]
+        f_corr = ratio ** (np.arange(nconv - 1, -1, -1)) / subband_response[1, chidx]
         for corri in np.arange(0, ncorr, 1):
             corr_spec[:, chidx, corri] = (np.convolve(ob_spec[:, chidx, corri], f_corr))[nconv - 1:]
             # compensate for missing sample
@@ -89,8 +90,8 @@ def corr(ini_ob_spec, Re_sb, nconv):
     # From central channel upwards, ignore response of next subband (for a certain subband, channel33 to channel 63
     # were mostly influenced by previous subband's channel33 to channel63)
     for chidx in np.arange(num_channels / 2 + 1, num_channels, 1):
-        ratio = -1. * Re_sb[0, chidx] / Re_sb[1, chidx]
-        f_corr = ratio ** (np.arange(0, nconv, 1)) / Re_sb[1, chidx]
+        ratio = -1. * subband_response[0, chidx] / subband_response[1, chidx]
+        f_corr = ratio ** (np.arange(0, nconv, 1)) / subband_response[1, chidx]
         for corri in np.arange(0, ncorr, 1):
             corr_spec[:, chidx, corri] = (np.convolve(ob_spec[:, chidx, corri], f_corr))[0:num_subbands]
         if chidx > num_channels - nconv - 1:
@@ -109,8 +110,8 @@ def corr(ini_ob_spec, Re_sb, nconv):
     # disable this block, might save some time
     nedge = 3
     chidx = 0
-    ratio = -1. * Re_sb[2, chidx] / Re_sb[1, chidx]
-    f_corr = ratio ** (np.arange(num_subbands - 1, -1, -1)) / Re_sb[1, chidx]
+    ratio = -1. * subband_response[2, chidx] / subband_response[1, chidx]
+    f_corr = ratio ** (np.arange(num_subbands - 1, -1, -1)) / subband_response[1, chidx]
     # estimate missing data,use average of first and last channel as initial estimate
     ini_spec = (corr_spec[:, 1, :] + np.roll(corr_spec[:, num_channels - 1, :], 1, axis=0)) / 2.
     ini_spec[0, :] = corr_spec[0, 1, :]
@@ -135,16 +136,23 @@ def corr(ini_ob_spec, Re_sb, nconv):
 
     # Rransform the power spectrum back to visibility complex numbers, we assume that phase of complex numbers remains
     # the same throughout AAF.
-    corr_spec = ini_ob_spec * (corr_spec / np.reshape(ob_spec, (ob_spec.size / ncorr, ncorr)))
+    corr_spec = vis * (corr_spec / np.reshape(ob_spec, (ob_spec.size / ncorr, ncorr)))
     return corr_spec
 
 
-def conver(a_b):
+def antialias_list(arg_list):
     # This function is just for passing multi arguments to the above funtion corr().
-    return corr(*a_b)
+    return antialias_visibilities(*arg_list)
 
 
-def MS_corr(msname, tol, outputcolname="DATA_AAF"):
+def file_prefix():
+    """Return the location of this file, useful for finding the data file"""
+    filepath = os.path.split(__file__)
+    filepath = os.path.split(filepath[0])
+    return filepath[0]
+
+
+def antialias_ms(msname, tol, outputcolname="DATA_AAF"):
     """
     Apply an anti aliasing filter in a parallel way to a measurement set
 
@@ -171,37 +179,37 @@ def MS_corr(msname, tol, outputcolname="DATA_AAF"):
         dmname["NAME"] = 'TiledAAFData'
         ms.addcols(coldes, dminfo=dmname)
 
-    # 2. Calculate function corr()'s two arguments: Re_sb and nconv
+    # 2. Calculate function corr()'s two arguments: subband_response and nconv
 
     # Fixed parameters: Number of channels per subband;  Total number of subbands
     num_channels = 64
     num_subbands = 1024
 
     # Load filter coefficients, pad with zero
-    coeff = np.loadtxt('Coeffs16384Kaiser-quant.dat')
+    coeff = np.loadtxt(file_prefix() + '/share/aaf/Coeffs16384Kaiser-quant.dat')
     coeff = np.append(coeff, np.zeros(num_channels * num_subbands - coeff.size))
 
     # Get filter frequency response by doing FFT on filter coefficients
-    Re_fren = np.abs(np.fft.fft(coeff)) ** 2
+    frequency_response = np.abs(np.fft.fft(coeff)) ** 2
 
     # Scaling
-    Re_fren = Re_fren / np.sum(Re_fren) * num_channels
+    frequency_response = frequency_response / np.sum(frequency_response) * num_channels
 
     # We only consider aliasing influence from the neighbouring two bands
-    Re_sb = np.roll(Re_fren, int(1.5 * num_channels))
-    Re_sb = np.reshape(Re_sb[0:3 * num_channels], (3, num_channels))
+    subband_response = np.roll(frequency_response, int(1.5 * num_channels))
+    subband_response = np.reshape(subband_response[0:3 * num_channels], (3, num_channels))
 
     # Tolerance, filter response below that is ignored
     # maximum de-convolution length
-    nconv = int(math.ceil(math.log(tol, Re_sb[2, 1] / Re_sb[1, 1])))
+    nconv = int(math.ceil(math.log(tol, subband_response[2, 1] / subband_response[1, 1])))
 
     # 3. Do AAF calibration concurrently (parallel)
     num_cpus = multiprocessing.cpu_count()
     pool = multiprocessing.Pool(processes=num_cpus - 1)
 
-    # Here itertools and the function conver() are just bridges between pool.map and function corr(), because pool.map
+    # Here itertools and the function antialias_list() are just bridges between pool.map and function corr(), because pool.map
     # is not suitable for function that has multi arguments.
-    aafdata = pool.map(conver, itertools.izip(ini_data[0:nrows], itertools.repeat(Re_sb), itertools.repeat(nconv)))
+    aafdata = pool.map(antialias_list, itertools.izip(ini_data[0:nrows], itertools.repeat(subband_response), itertools.repeat(nconv)))
 
     # 4. Write AAF corrected data to MS, usually the size of data is very large (for example 109746*16384*4 in my
     # current MS), to avoid Memory Error, we wrote the data by four steps.
@@ -224,4 +232,4 @@ if __name__ == '__main__':
                         default="DATA_AAF")
     args = parser.parse_args()
 
-    MS_corr(args.msname, args.tolerance, outputcolname=args.output_column)
+    antialias_ms(args.msname, args.tolerance, outputcolname=args.output_column)
