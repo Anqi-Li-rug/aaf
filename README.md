@@ -5,8 +5,8 @@ This code will apply an anti-aliasing filter to Apertif data. The code is writte
 To use the code, use the stand-alone mode:
 
 ```bash
-./AAF.py --help
-usage: AAF.py [-h] [-t TOLERANCE] [-o OUTPUT_COLUMN] msname
+aaf.py --help
+usage: aaf.py [-h] [-t TOLERANCE] [-o OUTPUT_COLUMN] msname
 
 Apertif Anti-aliasing filter.
 
@@ -22,10 +22,10 @@ optional arguments:
                         (default DATA_AAF)
 ```
 
-Also, it can be used from python: go to the directory which contains  'AAF.py' and 'Coeffs16384Kaiser-quant.dat'
+Also, it can be used from python:
 
 To run the code in python: 
 ```python
-import AAF
-AAF.MS_corr('WSRTA18017026_B00.MS/',0.00001)
+from aaf import antialias_ms
+antialias_ms('WSRTA18017026_B00.MS/', 0.00001)
 ```
