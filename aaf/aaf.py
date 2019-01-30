@@ -10,6 +10,7 @@ import itertools
 import datetime
 import argparse
 import os.path
+import logging
 
 
 def antialias_visibilities(vis, subband_response, nconv):
@@ -149,6 +150,7 @@ def file_prefix():
     """Return the location of this file, useful for finding the data file"""
     filepath = os.path.split(__file__)
     filepath = os.path.split(filepath[0])
+    filepath = os.path.split(filepath[0])
     return filepath[0]
 
 
@@ -164,7 +166,8 @@ def antialias_ms(msname, tol, outputcolname="DATA_AAF"):
     Returns:
         None
     """
-    # this function is to implement function corr parallel on the whole MeasurementSet
+    logger = logging.getLogger("aaf")
+    logger.info("Anti-aliasing measurement set " + msname)
     # 1. Open MS and read subtable 'DATA',
     #    if necessary create a new column (default "DATA_AAF") to store AAF corrected data.
     t1 = datetime.datetime.now()
@@ -221,6 +224,7 @@ def antialias_ms(msname, tol, outputcolname="DATA_AAF"):
                   nrow=end_row[parti] - start_row[parti])
     t2 = datetime.datetime.now()
     print("Total execution time:", (t2 - t1).total_seconds(), "seconds")
+    logger.info("Done anti-aliasing measurement set " + msname + ", wrote results to column " + outputcolname)
 
 
 if __name__ == '__main__':
@@ -231,5 +235,7 @@ if __name__ == '__main__':
     parser.add_argument("-o", "--output-column", help="Column to output the corrected visibilities to (default DATA_AAF)",
                         default="DATA_AAF")
     args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO)
 
     antialias_ms(args.msname, args.tolerance, outputcolname=args.output_column)
