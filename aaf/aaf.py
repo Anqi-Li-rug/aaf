@@ -224,7 +224,9 @@ def antialias_ms(msname, tol, outputcolname="DATA_AAF"):
                   nrow=end_row[parti] - start_row[parti])
     t2 = datetime.datetime.now()
     print("Total execution time:", (t2 - t1).total_seconds(), "seconds")
-    logger.info("Done anti-aliasing measurement set " + msname + ", wrote results to column " + outputcolname)
+    log_msg = "Performed anti-aliasing on MS, wrote result to column " + outputcolname
+    pt.taql('INSERT INTO {}::HISTORY SET MESSAGE="{}", APPLICATION="apercal"'.format(msname, log_msg))
+    logger.info(log_msg)
 
 
 if __name__ == '__main__':
