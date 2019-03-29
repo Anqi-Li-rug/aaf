@@ -11,7 +11,7 @@ import datetime
 import argparse
 import os.path
 import logging
-
+import pyrap.tables as pt
 
 def antialias_visibilities(vis, subband_response, nconv):
     """
@@ -36,14 +36,12 @@ def antialias_visibilities(vis, subband_response, nconv):
     # Calculate the power spectrum, reshape spectrum
     ob_spec = abs(vis)
     ob_spec = np.reshape(ob_spec, (num_subbands, num_channels, ncorr))
-
     # Estimate missing subbands
     # Find missing subbands and create an array to record the location of missing subbands
     sumspec = np.sum(ob_spec, axis=1)
     zeros = np.where(sumspec == 0)
     flag = np.zeros(ob_spec.shape)
     flag[zeros[0], :, zeros[1]] = 1
-
     # Use linear interpolation to estimate the missing subbands
     ob_spec1 = list((np.swapaxes(ob_spec, 0, 2)).reshape(ob_spec.shape[1] * ob_spec.shape[2], ob_spec.shape[0]))
     ob_spec2 = np.swapaxes(np.array(
@@ -132,13 +130,16 @@ def antialias_visibilities(vis, subband_response, nconv):
     # Flag the missing subbands and negative values
     corr_spec[np.where(corr_spec < 0)] = np.nan
     corr_spec[np.where(flag == 1)] = np.nan
+    corr_spec[:,0,:]=np.nan  
     # Reshape spectrum
     corr_spec = np.reshape(corr_spec, (corr_spec.size / ncorr, ncorr))
 
     # Rransform the power spectrum back to visibility complex numbers, we assume that phase of complex numbers remains
     # the same throughout AAF.
     corr_spec = vis * (corr_spec / np.reshape(ob_spec, (ob_spec.size / ncorr, ncorr)))
-    return corr_spec
+    flagl=np.isnan(corr_spec)
+    corr_spec[np.isnan(corr_spec)]=0  
+    return [corr_spec,flagl]
 
 
 def antialias_list(arg_list):
@@ -154,7 +155,7 @@ def file_prefix():
     return filepath[0]
 
 
-def antialias_ms(msname, tol, outputcolname="DATA_AAF"):
+def antialias_ms(msname, tol, outputcolname="DATA"):
     """
     Apply an anti aliasing filter in a parallel way to a measurement set
 
@@ -174,12 +175,12 @@ def antialias_ms(msname, tol, outputcolname="DATA_AAF"):
     ms = tables.table(msname, readonly=False, ack=False)
     nrows = ms.nrows()
     ini_data = tables.tablecolumn(ms, 'DATA')
-
+    oricolname='DATA_ori'
     # If there is no column "DATA_AAF", then create one.
-    if outputcolname not in ms.colnames():
-        coldes = tables.makecoldesc(outputcolname, ms.getcoldesc('DATA'))
+    if oricolname not in ms.colnames():
+        coldes = tables.makecoldesc(oricolname, ms.getcoldesc('DATA'))
         dmname = ms.getdminfo('DATA')
-        dmname["NAME"] = 'TiledAAFData'
+        dmname["NAME"] = 'TiledoriData'
         ms.addcols(coldes, dminfo=dmname)
 
     # 2. Calculate function corr()'s two arguments: subband_response and nconv
@@ -189,7 +190,7 @@ def antialias_ms(msname, tol, outputcolname="DATA_AAF"):
     num_subbands = 1024
 
     # Load filter coefficients, pad with zero
-    coeff = np.loadtxt(file_prefix() + '/share/aaf/Coeffs16384Kaiser-quant.dat')
+    coeff = np.loadtxt(file_prefix() + '/data/li/aaf/Coeffs16384Kaiser-quant.dat')
     coeff = np.append(coeff, np.zeros(num_channels * num_subbands - coeff.size))
 
     # Get filter frequency response by doing FFT on filter coefficients
@@ -208,7 +209,7 @@ def antialias_ms(msname, tol, outputcolname="DATA_AAF"):
 
     # 3. Do AAF calibration concurrently (parallel)
     num_cpus = multiprocessing.cpu_count()
-    pool = multiprocessing.Pool(processes=num_cpus - 1)
+    pool = multiprocessing.Pool(processes=num_cpus - 20)
 
     # Here itertools and the function antialias_list() are just bridges between pool.map and function corr(), because pool.map
     # is not suitable for function that has multi arguments.
@@ -219,9 +220,11 @@ def antialias_ms(msname, tol, outputcolname="DATA_AAF"):
     chunksize = nrows / 4
     start_row = np.array([0, chunksize, chunksize * 2, chunksize * 3])
     end_row = np.array([chunksize, chunksize * 2, chunksize * 3, nrows])
+    #write original data into 'DATA_ori'
+    ms.putcol(oricolname,np.array(ini_data),nrow=nrows)
     for parti in range(0, 4):
-        ms.putcol(outputcolname, np.array(aafdata[start_row[parti]:end_row[parti]]), startrow=start_row[parti],
-                  nrow=end_row[parti] - start_row[parti])
+        ms.putcol(outputcolname, np.array(aafdata[start_row[parti]:end_row[parti]])[:,0,:,:], startrow=start_row[parti],nrow=end_row[parti] - start_row[parti])
+        ms.putcol('FLAG', np.array(aafdata[start_row[parti]:end_row[parti]],dtype=bool)[:,1,:,:], startrow=start_row[parti],nrow=end_row[parti]-start_row[parti])
     t2 = datetime.datetime.now()
     print("Total execution time:", (t2 - t1).total_seconds(), "seconds")
     log_msg = "Performed anti-aliasing on MS, wrote result to column " + outputcolname
